@@ -38,7 +38,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[])
     normal_distribution<double> dist_theta(theta, std[2]);
     gen = std::mt19937_64(rd());
 
-    num_particles = 10;  // TODO: Set the number of particles
+    num_particles = 100;
     particles.clear();
     for(int i = 0; i < num_particles; ++i)
     {
@@ -71,9 +71,9 @@ void ParticleFilter::prediction(double delta_t, double std_pos[],
     for(auto & particle: particles)
     {
         //add measurement
-        if( velocity > ERROR)
+        if( fabs(yaw_rate) > ERROR)
         {
-            double c = (velocity / delta_t);
+            double c = (velocity / yaw_rate);
             double d = delta_t * yaw_rate;
             particle.x +=  c * (sin(particle.theta + d)- sin(particle.theta));
             particle.y +=  c * (cos(particle.theta) - cos(particle.theta + d));
@@ -127,8 +127,10 @@ vector<LandmarkObs> ParticleFilter::toMapCoordinates(const Particle& particle, c
     vector<LandmarkObs> observations_map;
     for(auto const& obs: observations)
     {
-        double x_map = particle.x + (cos(particle.theta) * obs.x) - (sin(particle.theta) * obs.y);
-        double y_map = particle.y + (sin(particle.theta) * obs.x) + (cos(particle.theta) * obs.y);
+        double x_map = cos(particle.theta) * obs.x - sin(particle.theta) * obs.y;
+        x_map += particle.x;
+        double y_map = sin(particle.theta) * obs.x + cos(particle.theta) * obs.y;
+        y_map += particle.y;
         LandmarkObs observation = LandmarkObs{-1, x_map, y_map};
         observations_map.push_back(observation);
     }
@@ -183,18 +185,18 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
         vector<int> associations;
         //reset weight
         particle.weight = 1;
-        //no close landmark.
         if (predicted.size() == 0)
         {
-            particle.weight = 0;
+            particle.weight = 0;//0 or some EPS^len(mapped_observation)
             continue;
         }
         for(auto const& observation: mapped_observation)
         {
+            //for debuging purposes detecting -nan
             assert(observation.id != -1);
             auto predicted = landmarkMap.at(observation.id);
 
-            double gauss_norm = (2.0 * M_PI * sig_x * sig_y);
+            double gauss_norm = 1/(2.0 * M_PI * sig_x * sig_y);
             double diff_x = predicted.x_f - observation.x;
             double diff_y = predicted.y_f - observation.y;
 
@@ -202,15 +204,15 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
             double power2 = (diff_y * diff_y) / (2.0 * sig_y * sig_y);
             double power = power1 + power2;
 
-            double weight = exp(-power) / gauss_norm;
+            double weight = gauss_norm * exp(-power) ;
             particle.weight *= weight;
+
 
             sense_x.push_back(predicted.x_f);
             sense_y.push_back(predicted.y_f);
             associations.push_back(predicted.id_i);
         }
         setAssociations( particle, associations, sense_x, sense_y);
-        //std::cout<<particle.weight<<std::endl;
     }
 }
 
@@ -223,17 +225,20 @@ void ParticleFilter::resample()
      *   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
      */
     vector<double> weights;
+    //double total_weight = 0;
     for( auto& particle: particles)
     {
+        //total_weight += particle.weight;
         weights.push_back(particle.weight);
     }
+    //assert(total_weight != 0);
+
     std::discrete_distribution<> d(weights.begin(), weights.end());
     vector<Particle> temp_particles;
     for(int i = 0; i < num_particles; ++i)
     {
         int idx = d(gen);
-        Particle particle = particles[idx];
-        temp_particles.push_back(particle);
+        temp_particles.push_back(particles[idx]);
     }
     particles = temp_particles;
 
